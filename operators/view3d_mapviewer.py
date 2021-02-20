@@ -37,9 +37,9 @@ from gpu_extras.batch import batch_for_shader
 from ..core import HAS_GDAL, HAS_PIL, HAS_IMGIO
 from ..core.proj import reprojPt, reprojBbox, dd2meters, meters2dd
 from ..core.basemaps import GRIDS, SOURCES, MapService
-from ..core.settings import getSetting
 
-USER_AGENT = getSetting('user_agent')
+from ..core import settings
+USER_AGENT = settings.user_agent
 
 #bgis imports
 from ..geoscene import GeoScene, SK, georefManagerLayout
@@ -181,7 +181,6 @@ class BaseMap(GeoScene):
 		dx, dy, dz = self.reg3d.view_location
 		ox = self.crsx + (dx * self.scale)
 		oy = self.crsy + (dy * self.scale)
-		log.debug('Computing bounding box w:{}, h:{}, vloc:({},{},{}), z:{}, r:{}'.format(w, h, dx, dy, dz, z, res))
 		xmin = ox - w/2 * res * self.scale
 		ymax = oy + h/2 * res * self.scale
 		xmax = ox + w/2 * res * self.scale
@@ -468,8 +467,7 @@ class VIEW3D_OT_map_start(Operator):
 	def invoke(self, context, event):
 
 		if not HAS_PIL and not HAS_GDAL and not HAS_IMGIO:
-			self.report({'ERROR'}, "No imaging library available. ImageIO module was not correctly installed.\
-			Please reinstall it or try to install Python GDAL or Pillow module")
+			self.report({'ERROR'}, "No imaging library available. ImageIO module was not correctly installed.")
 			return {'CANCELLED'}
 
 		if not context.area.type == 'VIEW_3D':
@@ -493,6 +491,9 @@ class VIEW3D_OT_map_start(Operator):
 		folder = prefs.cacheFolder
 		if folder == "" or not os.path.exists(folder):
 			self.report({'ERROR'}, "Please define a valid cache folder path in addon's preferences")
+			return {'CANCELLED'}
+		if not os.access(folder, os.X_OK | os.W_OK):
+			self.report({'ERROR'}, "The selected cache folder has no write access")
 			return {'CANCELLED'}
 
 		if self.dialog == 'MAP':

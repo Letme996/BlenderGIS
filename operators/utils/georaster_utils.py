@@ -180,12 +180,12 @@ def geoRastUVmap(obj, uvLayer, rast, dx, dy, reproj=None):
 			#uvLoop.uv = [u,v]
 			uvLayer.data[i].uv = [u,v]
 
-def setDisplacer(obj, rast, uvTxtLayer, mid=0):
+def setDisplacer(obj, rast, uvTxtLayer, mid=0, interpolation=False):
 	#Config displacer
 	displacer = obj.modifiers.new('DEM', type='DISPLACE')
 	demTex = bpy.data.textures.new('demText', type = 'IMAGE')
 	demTex.image = rast.bpyImg
-	demTex.use_interpolation = False
+	demTex.use_interpolation = interpolation
 	demTex.extension = 'CLIP'
 	demTex.use_clamp = False #Needed to get negative displacement with float32 texture
 	displacer.texture = demTex
@@ -270,9 +270,7 @@ class bpyGeoRaster(GeoRaster):
 			#WARN : packed image can only be stored as png and this format does not support float32 datatype
 			self.bpyImg.pack()
 		if self.raw:
-			# Set image color space, it's very important because only
-			# Linear, Non Color and Raw color spaces will return raw values...
-			self.bpyImg.colorspace_settings.name = 'Non-Color'
+			self.bpyImg.colorspace_settings.is_data = True
 
 	def unload(self):
 		self.bpyImg.user_clear()

@@ -28,7 +28,7 @@ from .srv import EPSGIO
 from ..errors import ReprojError
 from ..utils import BBOX
 from ..checkdeps import HAS_GDAL, HAS_PYPROJ
-from ..settings import getSettings
+from .. import settings
 
 if HAS_GDAL:
 	from osgeo import osr, gdal
@@ -199,8 +199,7 @@ class Reproj():
 			return
 
 		#Get proj engine from module settings
-		prefs = getSettings()
-		self.iproj = prefs['proj_engine']
+		self.iproj = settings.proj_engine
 		if self.iproj not in ['AUTO', 'GDAL', 'PYPROJ', 'BUILTIN', 'EPSGIO']:
 			raise ReprojError('Wrong engine name')
 
@@ -268,14 +267,28 @@ class Reproj():
 
 		if self.iproj == 'GDAL':
 			#Since PROJ 6, the order of coordinates for geographic crs is latitude first, longitude second.
-			if osr.GetPROJVersionMajor() >= 6 and self.crs1.IsGeographic():
+			if hasattr(osr, 'GetPROJVersionMajor'):
+				projVersion = osr.GetPROJVersionMajor()
+			else:
+				projVersion = 4
+			if projVersion >= 6 and self.crs1.IsGeographic():
 				pts = [ (pt[1], pt[0]) for pt in pts]
-			xs, ys, _zs = zip(*self.osrTransfo.TransformPoints(pts))
+			if self.crs2.IsGeographic():
+				ys, xs, _zs = zip(*self.osrTransfo.TransformPoints(pts))
+			else:
+				xs, ys, _zs = zip(*self.osrTransfo.TransformPoints(pts))
 			return list(zip(xs, ys))
 
 		elif self.iproj == 'PYPROJ':
-			xs, ys = zip(*pts)
-			xs, ys = pyproj.transform(self.crs1, self.crs2, xs, ys)
+			if self.crs1.crs.is_geographic:
+				ys, xs = zip(*pts)
+			else:
+				xs, ys = zip(*pts)
+			transformer = pyproj.Transformer.from_proj(self.crs1, self.crs2)
+			if self.crs2.crs.is_geographic:
+				ys, xs = transformer.transform(xs, ys)
+			else:
+				xs, ys = transformer.transform(xs, ys)
 			return list(zip(xs, ys))
 
 		elif self.iproj == 'EPSGIO':

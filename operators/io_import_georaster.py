@@ -127,6 +127,12 @@ class IMPORTGIS_OT_georaster(Operator, ImportHelper):
 			default=False
 			)
 	#
+	demInterpolation: BoolProperty(
+			name="Smooth relief",
+			description="Use texture interpolation to smooth the resulting terrain",
+			default=True
+			)
+	#
 	fillNodata: BoolProperty(
 			name="Fill nodata values",
 			description="Interpolate existing nodata values to get an usuable displacement texture",
@@ -165,6 +171,7 @@ class IMPORTGIS_OT_georaster(Operator, ImportHelper):
 				else:
 					layout.label(text="There isn't georef mesh to apply on")
 			layout.prop(self, 'subdivision')
+			layout.prop(self, 'demInterpolation')
 			if self.subdivision == 'mesh':
 				layout.prop(self, 'step')
 			layout.prop(self, 'fillNodata')
@@ -249,6 +256,7 @@ class IMPORTGIS_OT_georaster(Operator, ImportHelper):
 			try:
 				rast = bpyGeoRaster(filePath)
 			except IOError as e:
+				log.error("Unable to open raster", exc_info=True)
 				self.report({'ERROR'}, "Unable to open raster, check logs for more infos")
 				return {'CANCELLED'}
 			#Get or set georef dx, dy
@@ -281,6 +289,7 @@ class IMPORTGIS_OT_georaster(Operator, ImportHelper):
 			try:
 				rast = bpyGeoRaster(filePath)
 			except IOError as e:
+				log.error("Unable to open raster", exc_info=True)
 				self.report({'ERROR'}, "Unable to open raster, check logs for more infos")
 				return {'CANCELLED'}
 			#Check pixel size and rotation
@@ -335,6 +344,7 @@ class IMPORTGIS_OT_georaster(Operator, ImportHelper):
 			try:
 				rast = bpyGeoRaster(filePath, subBoxGeo=subBox)
 			except IOError as e:
+				log.error("Unable to open raster", exc_info=True)
 				self.report({'ERROR'}, "Unable to open raster, check logs for more infos")
 				return {'CANCELLED'}
 			except OverlapError:
@@ -376,6 +386,7 @@ class IMPORTGIS_OT_georaster(Operator, ImportHelper):
 			try:
 				grid = bpyGeoRaster(filePath, subBoxGeo=subBox, clip=self.clip, fillNodata=self.fillNodata, useGDAL=HAS_GDAL, raw=True)
 			except IOError as e:
+				log.error("Unable to open raster", exc_info=True)
 				self.report({'ERROR'}, "Unable to open raster, check logs for more infos")
 				return {'CANCELLED'}
 			except OverlapError:
@@ -412,7 +423,7 @@ class IMPORTGIS_OT_georaster(Operator, ImportHelper):
 					subsurf.levels = 6
 					subsurf.render_levels = 6
 			#Set displacer
-			dsp = setDisplacer(obj, grid, uvTxtLayer)
+			dsp = setDisplacer(obj, grid, uvTxtLayer, interpolation=self.demInterpolation)
 
 		######################################
 		if self.importMode == 'DEM_RAW':
@@ -433,6 +444,7 @@ class IMPORTGIS_OT_georaster(Operator, ImportHelper):
 			try:
 				grid = GeoRaster(filePath, subBoxGeo=subBox, useGDAL=HAS_GDAL)
 			except IOError as e:
+				log.error("Unable to open raster", exc_info=True)
 				self.report({'ERROR'}, "Unable to open raster, check logs for more infos")
 				return {'CANCELLED'}
 			except OverlapError:

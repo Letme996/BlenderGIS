@@ -17,16 +17,18 @@
 #  All rights reserved.
 #  ***** GPL LICENSE BLOCK *****
 
+import bpy
+
 bl_info = {
 	'name': 'BlenderGIS',
 	'description': 'Various tools for handle geodata',
 	'author': 'domlysz',
 	'license': 'GPL',
 	'deps': '',
-	'version': (1, 0),
-	'blender': (2, 80, 0),
+	'version': (2, 2, 6),
+	'blender': (2, 83, 0),
 	'location': 'View3D > Tools > GIS',
-	'warning': '',
+	'warning': 'development version',
 	'wiki_url': 'https://github.com/domlysz/BlenderGIS/wiki',
 	'tracker_url': 'https://github.com/domlysz/BlenderGIS/issues',
 	'link': '',
@@ -34,11 +36,17 @@ bl_info = {
 	'category': '3D View'
 	}
 
+class BlenderVersionError(Exception):
+	pass
+
+if bl_info['blender'] > bpy.app.version:
+	raise BlenderVersionError(f"This addon requires Blender >= {bl_info['blender']}")
+
 #Modules
 CAM_GEOPHOTO = True
 CAM_GEOREF = True
 EXPORT_SHP = True
-GET_SRTM = True
+GET_DEM = True
 IMPORT_GEORASTER = True
 IMPORT_OSM = True
 IMPORT_SHP = True
@@ -50,13 +58,72 @@ BASEMAPS = True
 DROP = True
 EARTH_SPHERE = True
 
-import bpy, os
+import os, sys, tempfile
+from datetime import datetime
+
+def getAppData():
+	home = os.path.expanduser('~')
+	loc = os.path.join(home, '.bgis')
+	if not os.path.exists(loc):
+		os.mkdir(loc)
+	return loc
+
+APP_DATA = getAppData()
 
 import logging
+from logging.handlers import RotatingFileHandler
 #temporary set log level, will be overriden reading addon prefs
-logsFormat = "%(levelname)s:%(name)s:%(lineno)d:%(message)s"
-logging.basicConfig(level=logging.getLevelName('INFO'), format=logsFormat) #stdout stream
+#logsFormat = "%(levelname)s:%(name)s:%(lineno)d:%(message)s"
+logsFormat = '{levelname}:{name}:{lineno}:{message}'
+logsFileName = 'bgis.log'
+try:
+	#logsFilePath = os.path.join(os.path.dirname(__file__), logsFileName)
+	logsFilePath = os.path.join(APP_DATA, logsFileName)
+	#logging.basicConfig(level=logging.getLevelName('DEBUG'), format=logsFormat, style='{', filename=logsFilePath, filemode='w')
+	logHandler = RotatingFileHandler(logsFilePath, mode='a', maxBytes=512000, backupCount=1)
+except PermissionError:
+	#logsFilePath = os.path.join(bpy.app.tempdir, logsFileName)
+	logsFilePath = os.path.join(tempfile.gettempdir(), logsFileName)
+	logHandler = RotatingFileHandler(logsFilePath, mode='a', maxBytes=512000, backupCount=1)
+logHandler.setFormatter(logging.Formatter(logsFormat, style='{'))
 logger = logging.getLogger(__name__)
+logger.addHandler(logHandler)
+logger.setLevel(logging.DEBUG)
+logger.info('###### Starting new Blender session : {}'.format(datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+
+def _excepthook(exc_type, exc_value, exc_traceback):
+	if 'BlenderGIS' in exc_traceback.tb_frame.f_code.co_filename:
+		logger.error("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
+	sys.__excepthook__(exc_type, exc_value, exc_traceback)
+
+sys.excepthook = _excepthook #warn, this is a global variable, can be overrided by another addon
+
+####
+'''
+Workaround for `sys.excepthook` thread
+https://stackoverflow.com/questions/1643327/sys-excepthook-and-threading
+'''
+import threading
+
+init_original = threading.Thread.__init__
+
+def init(self, *args, **kwargs):
+
+	init_original(self, *args, **kwargs)
+	run_original = self.run
+
+	def run_with_except_hook(*args2, **kwargs2):
+		try:
+			run_original(*args2, **kwargs2)
+		except Exception:
+			sys.excepthook(*sys.exc_info())
+
+	self.run = run_with_except_hook
+
+threading.Thread.__init__ = init
+
+####
+
 
 import ssl
 if (not os.environ.get('PYTHONHTTPSVERIFY', '') and
@@ -64,7 +131,7 @@ if (not os.environ.get('PYTHONHTTPSVERIFY', '') and
 	ssl._create_default_https_context = ssl._create_unverified_context
 
 #from .core.checkdeps import HAS_GDAL, HAS_PYPROJ, HAS_PIL, HAS_IMGIO
-from .core.settings import getSettings, setSettings
+from .core.settings import settings
 
 #Import all modules which contains classes that must be registed (classes derived from bpy.types.*)
 from . import prefs
@@ -76,8 +143,8 @@ if CAM_GEOREF:
 	from .operators import add_camera_georef
 if EXPORT_SHP:
 	from .operators import io_export_shp
-if GET_SRTM:
-	from .operators import io_get_srtm
+if GET_DEM:
+	from .operators import io_get_dem
 if IMPORT_GEORASTER:
 	from .operators import io_import_georaster
 if IMPORT_OSM:
@@ -102,6 +169,24 @@ if EARTH_SPHERE:
 
 import bpy.utils.previews as iconsLib
 icons_dict = {}
+
+
+class BGIS_OT_logs(bpy.types.Operator):
+	bl_idname = "bgis.logs"
+	bl_description = 'Display BlenderGIS logs'
+	bl_label = "Logs"
+
+	def execute(self, context):
+		if logsFileName in bpy.data.texts:
+			logs = bpy.data.texts[logsFileName]
+		else:
+			logs = bpy.data.texts.load(logsFilePath)
+		bpy.ops.screen.area_split(direction='VERTICAL', factor=0.5)
+		area = bpy.context.area
+		area.type = 'TEXT_EDITOR'
+		area.spaces[0].text = logs
+		bpy.ops.text.reload()
+		return {'FINISHED'}
 
 
 class VIEW3D_MT_menu_gis_import(bpy.types.Menu):
@@ -129,8 +214,8 @@ class VIEW3D_MT_menu_gis_webgeodata(bpy.types.Menu):
 			self.layout.operator("view3d.map_start", icon_value=icons_dict["layers"].icon_id)
 		if IMPORT_OSM:
 			self.layout.operator("importgis.osm_query", icon_value=icons_dict["osm"].icon_id)
-		if GET_SRTM:
-			self.layout.operator("importgis.srtm_query", icon_value=icons_dict["raster"].icon_id)
+		if GET_DEM:
+			self.layout.operator("importgis.dem_query", icon_value=icons_dict["raster"].icon_id)
 
 class VIEW3D_MT_menu_gis_camera(bpy.types.Menu):
 	bl_label = "Camera"
@@ -178,7 +263,8 @@ class VIEW3D_MT_menu_gis(bpy.types.Menu):
 		layout.menu('VIEW3D_MT_menu_gis_mesh', icon='MESH_DATA')
 		layout.menu('VIEW3D_MT_menu_gis_object', icon='CUBE')
 		layout.menu('VIEW3D_MT_menu_gis_nodes', icon='NODETREE')
-
+		layout.separator()
+		layout.operator("bgis.logs", icon='TEXT')
 
 menus = [
 VIEW3D_MT_menu_gis,
@@ -198,7 +284,6 @@ def add_gis_menu(self, context):
 
 
 def register():
-
 	#icons
 	global icons_dict
 	icons_dict = iconsLib.new()
@@ -219,6 +304,8 @@ def register():
 			bpy.utils.unregister_class(menu)
 			bpy.utils.register_class(menu)
 
+	bpy.utils.register_class(BGIS_OT_logs)
+
 	if BASEMAPS:
 		view3d_mapviewer.register()
 	if IMPORT_GEORASTER:
@@ -235,8 +322,8 @@ def register():
 		mesh_delaunay_voronoi.register()
 	if DROP:
 		object_drop.register()
-	if GET_SRTM:
-		io_get_srtm.register()
+	if GET_DEM:
+		io_get_dem.register()
 	if CAM_GEOPHOTO:
 		add_camera_exif.register()
 	if CAM_GEOREF:
@@ -262,14 +349,12 @@ def register():
 
 	#Setup prefs
 	preferences = bpy.context.preferences.addons[__package__].preferences
-	#>>logger
-	#logger = logging.getLogger(__name__)
 	logger.setLevel(logging.getLevelName(preferences.logLevel)) #will affect all child logger
-	#>>core settings
-	cfg = getSettings()
-	cfg['proj_engine'] = preferences.projEngine
-	cfg['img_engine'] = preferences.imgEngine
-	setSettings(cfg)
+
+	#update core settings according to addon prefs
+	settings.proj_engine = preferences.projEngine
+	settings.img_engine = preferences.imgEngine
+
 
 def unregister():
 
@@ -289,6 +374,8 @@ def unregister():
 	for menu in menus:
 		bpy.utils.unregister_class(menu)
 
+	bpy.utils.unregister_class(BGIS_OT_logs)
+
 	prefs.unregister()
 	geoscene.unregister()
 	if BASEMAPS:
@@ -307,8 +394,8 @@ def unregister():
 		mesh_delaunay_voronoi.unregister()
 	if DROP:
 		object_drop.unregister()
-	if GET_SRTM:
-		io_get_srtm.unregister()
+	if GET_DEM:
+		io_get_dem.unregister()
 	if CAM_GEOPHOTO:
 		add_camera_exif.unregister()
 	if CAM_GEOREF:
